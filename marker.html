@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style type="text/css" media="all">
+html, body {
+    margin: 0px;
+    height: 100%;
+    background-color: #808080;
+}
+
+video {
+    margin-left: auto;
+    margin-right: auto;
+    display: block;
+}
+
+#ui {
+    box-sizing: border-box;
+    position: absolute;
+    bottom: 0px;
+    background-color: #a0a0a0;
+    height: 200px;
+    padding: 30px;
+    width: 100%;
+}
+
+input {
+    width: 60%;
+}
+
+span {
+    display: inline-block;
+    min-width: 100px;
+    text-align: center;
+}
+
+#instructions {
+    position: absolute;
+    right: 0px;
+    bottom: 0px;
+    padding-right: 30px;
+}
+        </style>
+    </head>
+    <body>
+        <div id="ui">
+            <span id="currentTime">0</span>
+            <span>/</span>
+            <span id="duration">0</span>
+            <br />
+            <br />
+            <input type="text" id="mark"/>
+            <br />
+            <br />
+            <input type="text" id="output"/>
+            <pre id="instructions">
+q - jump 10 sec fwd
+e - jump 10 sec bck
+a - jump back 0.1 seconds
+d - jump to next frame
+w - jump to prev mark
+s - jump to next mark
+m - mark
+u - update marks
+            </pre>
+        </div>
+
+        <script charset="utf-8">
+
+function toFixed(num, fixed) {
+    var re = new RegExp('^-?\\d+(?:\.\\d{0,' + (fixed || -1) + '})?');
+    return num.toString().match(re)[0];
+}
+
+function sec2time(timeInSeconds) {
+    var pad = function(num, size) { return ('000' + num).slice(size * -1); },
+    time = parseFloat(timeInSeconds).toFixed(3),
+    hours = Math.floor(time / 60 / 60),
+    minutes = Math.floor(time / 60) % 60,
+    seconds = Math.floor(time - minutes * 60),
+    milliseconds = time.slice(-3);
+
+    return pad(hours, 2) + ':' + pad(minutes, 2) + ':' + pad(seconds, 2) + '.' + pad(milliseconds, 3);
+}
+
+class CyclicArray {
+  constructor(items) {
+    this.items = items
+    this.index = 0
+  }
+
+  get() {
+    return this.items[this.index]
+  }
+
+  setIndexByValue(item) {
+    this.index = this.items.indexOf(item)
+    if (this.index < 0) {
+      console.warn('did not find item in CyclicArray')
+      this.index = 0
+    }
+  }
+
+  next() {
+    this.index += 1
+    if (this.index > (this.size() - 1)) { this.index = 0 }
+    return this.get()
+  }
+
+  prev() {
+    this.index -= 1
+    if (this.index < 0) { this.index = this.size() - 1 }
+    return this.get()
+  }
+
+  size() {
+    return this.items.length;
+  }
+}
+
+let params = new URLSearchParams(window.location.search);
+let videoPath = params.get('video');
+
+var video = document.createElement('video');
+video.setAttribute('width', 1080)
+video.setAttribute('height', 720)
+video.setAttribute('controls', true)
+
+video.addEventListener('timeupdate', () => {
+})
+
+const getCurrentTime = () => {
+    // return Math.round(video.currentTime * 1000);
+    return video.currentTime;
+}
+
+const updateCurrentTime = () => {
+    window.currentTime.innerHTML = getCurrentTime();
+}
+
+const updateDuration = () => {
+    window.duration.innerHTML = video.duration;
+}
+
+const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text).then(function() {
+      console.log('Async: Copying to clipboard was successful!');
+    }, function(err) {
+      console.error('Async: Could not copy text: ', err);
+    });
+}
+
+var reqId;
+var startTracking = () => {
+    updateCurrentTime();
+    const play = () => {
+        updateCurrentTime();
+        reqId = requestAnimationFrame(play);
+    }
+    reqId = requestAnimationFrame(play);
+};
+
+var stopTracking = () => {
+  if (reqId) {
+    cancelAnimationFrame(reqId);
+  }
+};
+
+const nextFrame = () => {
+    video.seekToNextFrame();
+    updateCurrentTime();
+}
+
+const prevFrame = () => {
+    video.currentTime = Math.max(0, video.currentTime - 0.1);
+    updateCurrentTime();
+}
+
+const seek = (amount = 1) => {
+    if (amount > 0) {
+        video.currentTime = Math.min(video.duration, video.currentTime + amount);
+    } else {
+        video.currentTime = Math.max(0, video.currentTime + amount);
+    }
+    updateCurrentTime();
+}
+
+let cyclicArray = new CyclicArray([]);
+
+const mark = () => {
+    let currentTime = getCurrentTime();
+    if (!cyclicArray.items.includes(currentTime)) {
+        cyclicArray.items.push(currentTime)
+    }
+    window.mark.value = cyclicArray.items.join(',')
+}
+
+video.addEventListener('play', startTracking);
+
+video.addEventListener('pause', stopTracking);
+
+var source = document.createElement('source');
+source.src = videoPath;
+source.type = 'video/ogg';
+video.appendChild(source);
+video.ondurationchange = () => {
+    updateDuration();
+    window.mark.onchange();
+
+    let currentTime = cyclicArray.get();
+    video.currentTime = currentTime;
+    updateCurrentTime();
+}
+document.body.appendChild(video);
+
+window.mark.onchange = () => {
+    cyclicArray.items = window.mark.value
+        .split(',')
+        .filter((e) => e !== '')
+        .map((e) => Number(e));
+
+    if (cyclicArray.size() < 2) { return }
+    let items = cyclicArray.items.join(',').split(',').reverse();
+
+    let output = "";
+    while (items.length > 0) {
+        let start = items.pop();
+        let end = items.pop();
+
+        if (end !== undefined) {
+            if (output !== "") { output += " && " }
+            output += `./cut.sh ${videoPath} ${sec2time(start)} ${toFixed(end - start, 3)}`
+        }
+    }
+    console.log(output);
+    window.output.value = output;
+};
+
+window.addEventListener('keypress', (evt) => {
+    console.log(evt.keyCode)
+    if (evt.keyCode === 32) { // space
+        if (video.paused) {
+            video.play();
+        } else {
+            video.pause();
+        }
+    } else if (evt.keyCode === 113) { // q
+        seek(-10);
+    } else if (evt.keyCode === 101) { // e
+        seek(10);
+    } else if (evt.keyCode === 109) { // m
+        mark();
+    } else if (evt.keyCode === 119) { // w
+        let currentTime = cyclicArray.next();
+        video.currentTime = currentTime;
+        updateCurrentTime();
+    } else if (evt.keyCode === 115) { // s
+        let currentTime = cyclicArray.prev();
+        video.currentTime = currentTime;
+        updateCurrentTime();
+    } else if (evt.keyCode === 117) { // u
+        window.mark.onchange();
+    }
+    if (video.paused) {
+        if (evt.keyCode === 97) { // a
+            prevFrame();
+        } else if (evt.keyCode === 100) { // d
+            nextFrame();
+        }
+    }
+});
+        </script>
+    </body>
+</html>
