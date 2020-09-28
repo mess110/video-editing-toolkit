@@ -18,4 +18,4 @@ DIR=$(dirname "${FILE}")
 FULL_OUTPUT_PATH=$DIR/$OUTPUT_FILE
 
 ./log.sh "Writing file '$FULL_OUTPUT_PATH'"
-ffmpeg -ss $FROM -i $FILE -t $SECONDS -c copy $FULL_OUTPUT_PATH
+ffmpeg -ss $FROM -i $FILE -avoid_negative_ts 1 -t $SECONDS -c copy $FULL_OUTPUT_PATH
